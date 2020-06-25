@@ -26,6 +26,7 @@ from numpy import (where, isnan, nan, diff, zeros,
 from numpy.linalg import matrix_rank, pinv, cholesky
 import numpy as np
 from scipy.linalg import qr
+from scipy.stats import linregress
 from joblib import Parallel, delayed
 from pyrate.core.shared import joblib_log_level
 from pyrate.core.algorithm import master_slave_ids, get_epochs
@@ -311,3 +312,21 @@ class TimeSeriesError(Exception):
     """
     Generic exception for time series errors.
     """
+
+
+def linear_rate(tscuml, ifgs):
+    """
+    Calculate best fitting linear rate to cumulative time series
+    """
+    epochlist = get_epochs(ifgs)[0]
+    t = asarray(epochlist.spans)
+    print(type(t))
+    print(t)
+    y = tscuml[0, 0, :]
+    y = np.insert(y, 0, 0., axis=0)
+    print(type(y))
+    print(y)
+    rate, intercept, r_value, p_value, std_err = linregress(t, y)
+    print(rate, r_value**2)
+    return rate, r_value**2
+
