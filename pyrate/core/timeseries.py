@@ -314,19 +314,73 @@ class TimeSeriesError(Exception):
     """
 
 
-def linear_rate(tscuml, ifgs):
+def linear_rate_pixel(y, t):
     """
-    Calculate best fitting linear rate to cumulative time series
+    Calculate best fitting linear rate to cumulative time series for one pixel
     """
+
+    # insert leading zero (not saved in tscuml by default)
+    y = np.insert(y, 0, 0., axis=0)
+
+    # remove nan elements from both arrays
+    t = t[~isnan(y)]
+    y = y[~isnan(y)]    
+    samples = len(y)
+
+    # break out if not enough time series obs
+    if samples < 2:
+        return nan, nan, nan, nan
+
+    # compute linear regression of tscuml 
+    rate, intercept, r_value, p_value, std_err = linregress(t, y)
+    
+    return rate, r_value**2, std_err, samples
+
+
+def linear_rate_array(tscuml, ifgs, params):
+    """
+    This function loops over all interferogram pixels in a 3-dimensional array and estimates
+    the pixel rate (velocity) by applying the iterative weighted least-squares stacking
+    algorithm 'pyrate.core.stack.stack_rate_pixel'.
+
+    :param Ifg.object ifgs: Sequence of objects containing the interferometric observations
+    :param dict params: Configuration parameters
+    :param ndarray vcmt: Derived positive definite temporal variance covariance matrix
+    :param ndarray mst: Pixel-wise matrix describing the minimum spanning tree network
+
+    :return: rate: Rate (velocity) map
+    :rtype: ndarray
+    :return: error: Standard error of the rate map
+    :rtype: ndarray
+    :return: samples: Number of observations used in rate calculation for each pixel
+    :rtype: ndarray
+    """
+    b0_mat, interp, p_thresh, sm_factor, sm_order, ts_method, ifg_data, mst, \
+        ncols, nrows, nvelpar, parallel, span, tsvel_matrix = \
+        _time_series_setup(ifgs, mst=None, params)
+
     epochlist = get_epochs(ifgs)[0]
     t = asarray(epochlist.spans)
-    print(type(t))
+    print(span)
     print(t)
-    y = tscuml[0, 0, :]
-    y = np.insert(y, 0, 0., axis=0)
-    print(type(y))
-    print(y)
-    rate, intercept, r_value, p_value, std_err = linregress(t, y)
-    print(rate, r_value**2)
-    return rate, r_value**2
+
+    # pixel-by-pixel calculation.
+    # nested loops to loop over the 2 image dimensions
+    if parallel:
+        log.info('Calculating linear regression of cumulative time series in parallel')
+        res = Parallel(n_jobs=params[cf.PROCESSES], verbose=joblib_log_level(cf.LOG_LEVEL))(
+                delayed(linear_rate_pixel)(tscuml[r, c, :], t) for r, c in itertools.product(range(rows), range(cols))
+        )
+        res = np.array(res)
+
+        rate = res[:, 0].reshape(rows, cols)
+        error = res[:, 1].reshape(rows, cols)
+        samples = res[:, 2].reshape(rows, cols)
+    else:
+        log.info('Calculating linear regression of cumulative time series in serial')
+        for i in range(rows):
+            for j in range(cols):
+                rate[i, j], error[i, j], samples[i, j], _ = linear_rate_pixel(tscuml[i, j, :], t)
+
+    return rate, error, samples
 
